@@ -35,3 +35,4 @@ Use datainsert.py from the ADS-Apollo something or other repo with the following
         ]
     }```
 
+Use pull_localization_data.py to pull the data from the database and export to csv.
