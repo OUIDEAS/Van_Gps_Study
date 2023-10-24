@@ -4,6 +4,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.model_selection import train_test_split
+
+
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Dense
+from sklearn.metrics import accuracy_score
+
 
 class CSVDataAggregator:
     def __init__(self, folder_path):
@@ -24,60 +34,80 @@ class CSVDataAggregator:
             self.dataframes.append(df)
         
         combined_data = pd.concat(self.dataframes, ignore_index=True)
+        combined_data['magnitude'] = combined_data.apply(lambda row: np.sqrt(row['latitudeStdDev']**2 + row['longitudeStdDev']**2), axis=1)
+        
+        # print(type(combined_data))
+
+        solType_replace_mapping = {'SINGLE':16, 
+                           'PSRDIFF':17, 
+                           'L1_FLOAT':32, 
+                           'NARROW_FLOAT':34, 
+                           'L1_INT':48, 
+                           'WIDE_INT':49, 
+                           'NARROW_INT':50, 
+                           'INS_PSRSP':52, 
+                           'INS_PSRDIFF':54, 
+                           'INS_RTKFLOAT':55, 
+                           'INS_RTKFIXED':56, 
+                           'PPP_CONVERGING':68, 
+                           'PPP':66, 
+                           'INS_PPP_CONVERGING':73, 
+                           'INS_PPP':74, 
+                           'PPP_BASIC_CONVERGING':77}
+        
+        solStatus_replace_mapping = {'SOL_COMPUTED':0,
+                                     'INSUFFICIENT_OBS':1,
+                                     'NO_CONVERGENCE':2,
+                                     'SINGULARITY':3,
+                                     'COV_TRACE':4,
+                                     'TEST_DIST':5,
+                                     'COLD_START':6,
+                                     'V_H_LIMIT':7,
+                                     'VARIANCE':8,
+                                     'RESIDUALS':9,
+                                     'INTEGRITY_WARNING':13,
+                                     'PENDING':18,
+                                     'INVALID_FIX':19,
+                                     'UNAUTHORIZED':20,
+                                     'INVALID_RATE':22}
+        
+        
+        combined_data['solType'].replace(solType_replace_mapping, inplace=True)
+        combined_data['solStatus'].replace(solStatus_replace_mapping, inplace=True)
 
         # DEBUG
         if debug == 'true':
+            CSVExporter(combined_data, 'combined_data.csv')
+        return combined_data
+    
+class CSVExporter:
+    def __init__(self, data_to_csv, debug_filename):
             print('Saving cvs...')
-            debug_filename = f'debug_aggregated_data.csv'
-            combined_data.to_csv(debug_filename, index=False)
+            data_to_csv.to_csv(debug_filename, index=False)
             print('CVS Saved!')
-        return combined_data.to_numpy()
+    
 
-# create NeuralNetwork class
-class NeuralNetwork:
+class NeuralNetwork():
+    def __init__(self, train_in, train_out):
+        super(NeuralNetwork, self).__init__()
+        model = Sequential()
+        model.add(Dense(units=32, activation='relu', input_dim=len(train_in.columns)))
+        model.add(Dense(units=64, activation='relu'))
+        model.add(Dense(units=1, activation='sigmoid'))
+        model.compile(loss='binary_crossentropy', optimizer='sgd', metrics='accuracy')
+        model.fit(train_in, train_out, epochs=200, batch_size=32)
 
-    # intialize variables in class
-    def __init__(self, inputs, outputs, weights):
-        self.inputs  = inputs
-        self.outputs = outputs
-        self.weights = weights
-        self.error_history = []
-        self.epoch_list = []
+        return None
 
-    #activation function ==> S(x) = 1/1+e^(-x)
-    def sigmoid(self, x, deriv=False):
-        if deriv == True:
-            return x * (1 - x)
-        return 1 / (1 + np.exp(-x))
+    def test_model(model, test_in, test_out):
+        test_prediction = model.predict(test_in)
+        accuracy_score(test_in, test_prediction)
+        print(f'Accuracy score {accuracy_score}')
 
-    # data will flow through the neural network.
-    def feed_forward(self):
-        self.hidden = self.sigmoid(np.dot(self.inputs, self.weights))
+    def model_save(model, filename):
+        model.save(filename)
 
-    # going backwards through the network to update weights
-    def backpropagation(self):
-        self.error  = self.outputs - self.hidden
-        delta = self.error * self.sigmoid(self.hidden, deriv=True)
-        self.weights += np.dot(self.inputs.T, delta)
-
-    # train the neural net for 25,000 iterations
-    def train(self, epochs=25000):
-        for epoch in range(epochs):
-            # flow forward and produce an output
-            self.feed_forward()
-            # go back though the network to make corrections based on the output
-            self.backpropagation()    
-            # keep track of the error history over each epoch
-            self.error_history.append(np.average(np.abs(self.error)))
-            self.epoch_list.append(epoch)
-
-    # function to predict output on new and unseen input data                               
-    def predict(self, new_input):
-        prediction = self.sigmoid(np.dot(new_input, self.weights))
-        return prediction
-
-
-
+##### Main Function #####
 if __name__ == "__main__":
 
     # Grab data from folder
@@ -85,23 +115,30 @@ if __name__ == "__main__":
     data_aggregator = CSVDataAggregator(training_data_folder)
     training_data = data_aggregator.aggregate_data(debug='true')
 
-        
-    # # create neural network   
-    # NN = NeuralNetwork(inputs, outputs)
-    # # train neural network
-    # NN.train()
+    # print(type(training_data))
+    # print(training_data.head)
+    # print(training_data.dtype.names)
 
-    # # create two new examples to predict                                   
-    # example = np.array([[1, 1, 0]])
-    # example_2 = np.array([[0, 1, 1]])
+    NN_Data_Inputs_ALL = training_data[['solutionAge', 'solStatus', 'numSatsTracked', 'numSatsInSolution', 'solType', 'numSatsL1', 'differentialAge']]
+    NN_Data_Output_ALL = training_data[['magnitude']]
 
-    # # print the predictions for both examples                                   
-    # print(NN.predict(example), ' - Correct: ', example[0][0])
-    # print(NN.predict(example_2), ' - Correct: ', example_2[0][0])
+    NN_Train_Data_Inputs, NN_Test_Data_Inputs, NN_Train_Data_Outputs, NN_Test_Data_Outputs = train_test_split(NN_Data_Inputs_ALL, NN_Data_Output_ALL, test_size=0.2)
+    
+    # CSVExporter(NN_Train_Data_Inputs, 'NN_Train_Data_Inputs.csv')
 
-    # # plot the error over the entire training duration
-    # plt.figure(figsize=(15,5))
-    # plt.plot(NN.epoch_list, NN.error_history)
-    # plt.xlabel('Epoch')
-    # plt.ylabel('Error')
-    # plt.show()
+    # print(NN_Train_Data_Inputs.head)
+    # print(NN_Train_Data_Outputs.head)
+    # print(NN_Test_Data_Inputs.head)
+    # print(NN_Test_Data_Outputs.head)
+    # print(len(NN_Train_Data_Inputs))
+    # print(len(NN_Train_Data_Outputs))
+    # print(len(NN_Test_Data_Inputs))
+    # print(len(NN_Test_Data_Outputs))
+
+    model = NeuralNetwork(NN_Train_Data_Inputs, NN_Train_Data_Outputs)
+
+    model.test_model(NN_Test_Data_Inputs, NN_Test_Data_Outputs)
+
+    model.save('tfmodel')
+
+
